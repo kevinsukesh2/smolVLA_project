@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+env/
+.conda/
+miniforge3/
+anaconda3/
+mambaforge/
+
+# Hugging Face / model cache
+.cache/
+huggingface/
+models/
+checkpoints/
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+
+# Simulation/data/output
+datasets/
+outputs/
+runs/
+logs/
+videos/
+*.mp4
+*.avi
+*.mov
+
+# Installers
+Miniforge3-*.sh
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
