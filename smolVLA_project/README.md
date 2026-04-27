@@ -122,6 +122,8 @@ lerobot/policies/groot/groot_n1.py
 
 not from the SmolVLA model file itself.
 
+The same LeRobot `0.5.1` on Python `3.12` bug can also block `lerobot-eval`, even when you are evaluating a SmolVLA checkpoint, because the CLI imports `lerobot.configs.eval`, which imports `from lerobot import envs, policies`, and that eventually trips over the broken GROOT import path before evaluation starts.
+
 The updated `scripts/load_smolvla.py` now:
 
 - tries the standard SmolVLA import first
@@ -164,6 +166,14 @@ If you must stay on the installed package, inspect:
 ```
 
 The failure is consistent with a dataclass field-ordering problem in `GR00TN15Config`, where non-default `init=False` fields appear before a default-valued field. A local patch or upstream fix to that config can unblock imports.
+
+For this repo, there is also a helper patch script:
+
+```bash
+python scripts/patch_lerobot_groot_import.py /home/kevin/miniforge3/envs/lerobot/lib/python3.12/site-packages
+```
+
+That patch makes LeRobot tolerate the GROOT import failure so `lerobot-eval` can continue loading other policies such as SmolVLA.
 
 ### Option 4: Use the LeRobot CLI instead of direct import
 
