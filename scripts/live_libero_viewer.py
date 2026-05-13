@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,42 @@ from lerobot.policies.factory import make_pre_post_processors
 from lerobot.utils.constants import ACTION
 
 from load_smolvla import import_policy_class
+
+DEFAULT_POLICY_PATH = "HuggingFaceVLA/smolvla_libero"
+DEFAULT_TASK_SUITE = "libero_object"
+DEFAULT_CAMERA_NAME = "agentview_image,robot0_eye_in_hand_image"
+
+
+@dataclass(frozen=True)
+class LiberoTaskMetadata:
+    """Small metadata record used by CLI helpers and the GUI task selector."""
+
+    task_id: int
+    task_name: str
+    language_instruction: str
+    bddl_filename: str | None
+
+
+def get_task_metadata(task_suite_name: str = DEFAULT_TASK_SUITE) -> list[LiberoTaskMetadata]:
+    """
+    Return lightweight metadata for a LIBERO task suite.
+
+    This only inspects suite/task definitions. It does not create MuJoCo environments,
+    which keeps RAM usage low for the GUI task selector.
+    """
+    suite = _get_suite(task_suite_name)
+    tasks: list[LiberoTaskMetadata] = []
+    for task_id in range(len(suite.tasks)):
+        task = suite.get_task(task_id)
+        tasks.append(
+            LiberoTaskMetadata(
+                task_id=task_id,
+                task_name=getattr(task, "name", f"task_{task_id}"),
+                language_instruction=getattr(task, "language", ""),
+                bddl_filename=getattr(task, "bddl_file", None),
+            )
+        )
+    return tasks
 
 
 class LiveLiberoEnv(BaseLiberoEnv):
@@ -112,17 +149,22 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run a single live-view LIBERO episode with a SmolVLA checkpoint."
     )
-    parser.add_argument("--policy-path", default="HuggingFaceVLA/smolvla_libero")
-    parser.add_argument("--task-suite", default="libero_object")
+    parser.add_argument("--policy-path", default=DEFAULT_POLICY_PATH)
+    parser.add_argument("--task-suite", default=DEFAULT_TASK_SUITE)
     parser.add_argument("--task-id", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--camera-name", default="agentview_image,robot0_eye_in_hand_image")
+    parser.add_argument("--camera-name", default=DEFAULT_CAMERA_NAME)
     parser.add_argument("--observation-width", type=int, default=360)
     parser.add_argument("--observation-height", type=int, default=360)
     parser.add_argument("--control-mode", default="relative", choices=["relative", "absolute"])
     parser.add_argument("--sleep", type=float, default=0.0, help="Optional pause after each rendered step.")
     parser.add_argument("--max-steps", type=int, default=None, help="Optional cap for quick testing.")
     parser.add_argument("--seed", type=int, default=1000)
+    parser.add_argument(
+        "--list-tasks",
+        action="store_true",
+        help="Print task metadata for the selected LIBERO task suite and exit.",
+    )
     return parser.parse_args()
 
 
@@ -172,9 +214,7 @@ def add_batch_dim_to_nested_tensors(value: Any) -> Any:
     return value
 
 
-def main() -> int:
-    args = parse_args()
-
+def run_live_episode(args: argparse.Namespace) -> int:
     suite = _get_suite(args.task_suite)
     if args.task_id < 0 or args.task_id >= len(suite.tasks):
         raise ValueError(f"task_id {args.task_id} is out of range for suite '{args.task_suite}'.")
@@ -257,6 +297,20 @@ def main() -> int:
         return 0
     finally:
         env.close()
+
+
+def print_task_metadata(task_suite_name: str) -> None:
+    for task in get_task_metadata(task_suite_name):
+        bddl_text = task.bddl_filename or "<unknown>"
+        print(f"{task.task_id}\t{bddl_text}\t{task.language_instruction}")
+
+
+def main() -> int:
+    args = parse_args()
+    if args.list_tasks:
+        print_task_metadata(args.task_suite)
+        return 0
+    return run_live_episode(args)
 
 
 if __name__ == "__main__":
