@@ -177,67 +177,63 @@ This script makes backups before patching. Skip this step if the model and evalu
 
 ## How to Run the Code
 
-### 1. Run the Live Simulation Demo
+Use these steps on a fresh WSL2 Ubuntu setup.
 
+## 1. Clone the repo
 ```bash
+git clone <YOUR_GITHUB_REPO_URL>
+cd "smolVLA_project"
+```
+
+## 2. Open WSL Ubuntu and create the environment
+```bash
+sudo apt update
+sudo apt install -y python3-tk ffmpeg build-essential cmake git pkg-config python3-dev
+source /home/kevin/miniforge3/etc/profile.d/conda.sh
+conda create -n lerobot python=3.12 -y
 conda activate lerobot
-cd /path/to/smolVLA_project
+```
+
+## 3. Install dependencies
+```bash
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
+python -m pip install num2words
+python -m pip install "lerobot[smolvla,libero] @ git+https://github.com/huggingface/lerobot.git"
+```
+
+## 4. Enable GUI rendering
+```bash
 export MUJOCO_GL=glfw
+```
+
+## 5. Run the project
+
+### GUI task selector
+```bash
+python scripts/libero_task_gui.py
+```
+
+### Or run the built-in live demo directly
+```bash
 python scripts/live_libero_viewer.py --task-id 0
 ```
 
-Explanation:
-
-- `MUJOCO_GL=glfw` is used for live window rendering.
-- `--task-id 0` chooses one LIBERO object task.
-- The script loads the task, prints the language instruction, loads SmolVLA, and renders the robot live.
-
----
-
-### 2. Run a Short Test
-
+### Or run the custom task
 ```bash
-export MUJOCO_GL=glfw
-python scripts/live_libero_viewer.py --task-id 0 --max-steps 20
+python scripts/live_libero_viewer.py --task-suite Kevins_custom_suite --task-id 0
 ```
 
-This is useful to check that the viewer opens without running a full episode.
-
----
-
-### 3. Try Other LIBERO Tasks
-
+## 6. Optional checks
 ```bash
-python scripts/live_libero_viewer.py --task-id 1
-python scripts/live_libero_viewer.py --task-id 2
-python scripts/live_libero_viewer.py --task-id 3
+python scripts/test_install.py
+python scripts/load_smolvla.py
 ```
 
-Run one task at a time because SmolVLA + LIBERO can use a lot of RAM.
-
----
-
-### 4. Run Headless Evaluation and Save a Video
-
+If `tkinter` is missing:
 ```bash
-export MUJOCO_GL=egl
-
-lerobot-eval \
-  --policy.path=HuggingFaceVLA/smolvla_libero \
-  --env.type=libero \
-  --env.task=libero_object \
-  --env.task_ids='[0]' \
-  --eval.batch_size=1 \
-  --eval.n_episodes=1 \
-  --env.max_parallel_tasks=1
+sudo apt install python3-tk
 ```
-
-Explanation:
-
-- `MUJOCO_GL=egl` is used for offscreen/headless rendering.
-- This mode saves a video in an `outputs/eval/.../videos/` folder.
-- This is useful for collecting output videos and success metrics.
-
 ---
 
 ### 5. File Overview
