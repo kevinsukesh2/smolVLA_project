@@ -21,6 +21,7 @@ except ImportError as exc:
 SCRIPT_PATH = Path(__file__).resolve().parent / "live_libero_viewer.py"
 KNOWN_SUITES = [
     "libero_object",
+    "Kevins_custom_suite",
     "libero_spatial",
     "libero_goal",
     "libero_10",

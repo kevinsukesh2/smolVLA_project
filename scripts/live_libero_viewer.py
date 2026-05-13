@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import re
 
 # Prefer a GUI-capable MuJoCo path for live rendering.
 # This is different from lerobot-eval, which goes through LeRobot's offscreen
@@ -31,6 +32,11 @@ from load_smolvla import import_policy_class
 DEFAULT_POLICY_PATH = "HuggingFaceVLA/smolvla_libero"
 DEFAULT_TASK_SUITE = "libero_object"
 DEFAULT_CAMERA_NAME = "agentview_image,robot0_eye_in_hand_image"
+CUSTOM_TASK_SUITES = {
+    "Kevins_custom_suite": [
+        Path("custom_libero_tasks/Kevins_custom_suite/yellow_mug_to_basket.bddl"),
+    ]
+}
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,23 @@ class LiberoTaskMetadata:
     bddl_filename: str | None
 
 
+@dataclass(frozen=True)
+class RepoLocalTaskSpec:
+    task_id: int
+    task_name: str
+    language_instruction: str
+    bddl_path: Path
+
+
+@dataclass(frozen=True)
+class RepoLocalTask:
+    name: str
+    language: str
+    bddl_file: str
+    bddl_path: Path
+    problem_folder: str = ""
+
+
 def get_task_metadata(task_suite_name: str = DEFAULT_TASK_SUITE) -> list[LiberoTaskMetadata]:
     """
     Return lightweight metadata for a LIBERO task suite.
@@ -50,6 +73,17 @@ def get_task_metadata(task_suite_name: str = DEFAULT_TASK_SUITE) -> list[LiberoT
     This only inspects suite/task definitions. It does not create MuJoCo environments,
     which keeps RAM usage low for the GUI task selector.
     """
+    if task_suite_name in CUSTOM_TASK_SUITES:
+        return [
+            LiberoTaskMetadata(
+                task_id=task.task_id,
+                task_name=task.task_name,
+                language_instruction=task.language_instruction,
+                bddl_filename=task.bddl_path.name,
+            )
+            for task in get_repo_local_task_specs(task_suite_name)
+        ]
+
     suite = _get_suite(task_suite_name)
     tasks: list[LiberoTaskMetadata] = []
     for task_id in range(len(suite.tasks)):
@@ -63,6 +97,40 @@ def get_task_metadata(task_suite_name: str = DEFAULT_TASK_SUITE) -> list[LiberoT
             )
         )
     return tasks
+
+
+def extract_language_from_bddl(bddl_text: str) -> str:
+    match = re.search(r"\(:language\s+(.+?)\)", bddl_text, flags=re.DOTALL)
+    if match:
+        return " ".join(match.group(1).split())
+    return ""
+
+
+def get_repo_local_task_specs(task_suite_name: str) -> list[RepoLocalTaskSpec]:
+    task_paths = CUSTOM_TASK_SUITES.get(task_suite_name, [])
+    repo_root = Path(__file__).resolve().parent.parent
+    specs: list[RepoLocalTaskSpec] = []
+    for task_id, relative_path in enumerate(task_paths):
+        bddl_path = (repo_root / relative_path).resolve()
+        bddl_text = bddl_path.read_text() if bddl_path.exists() else ""
+        specs.append(
+            RepoLocalTaskSpec(
+                task_id=task_id,
+                task_name=bddl_path.stem,
+                language_instruction=extract_language_from_bddl(bddl_text),
+                bddl_path=bddl_path,
+            )
+        )
+    return specs
+
+
+def make_repo_local_task(spec: RepoLocalTaskSpec) -> RepoLocalTask:
+    return RepoLocalTask(
+        name=spec.task_name,
+        language=spec.language_instruction,
+        bddl_file=spec.bddl_path.name,
+        bddl_path=spec.bddl_path,
+    )
 
 
 class LiveLiberoEnv(BaseLiberoEnv):
@@ -83,6 +151,28 @@ class LiveLiberoEnv(BaseLiberoEnv):
 
         env_args = {
             "bddl_file_name": task_bddl_file,
+            "camera_heights": self.observation_height,
+            "camera_widths": self.observation_width,
+            "camera_names": ["agentview", "robot0_eye_in_hand"],
+            "render_camera": self.render_camera_name,
+            "has_renderer": True,
+            "has_offscreen_renderer": True,
+        }
+        env = ControlEnv(**env_args)
+        env.reset()
+        return env
+
+
+class RepoLocalBddlLiberoEnv(LiveLiberoEnv):
+    """Variant of the live LIBERO env that loads a repo-local BDDL file directly."""
+
+    def _make_envs_task(self, task_suite: Any, task_id: int = 0):
+        task = task_suite.get_task(task_id)
+        self.task = task.name
+        self.task_description = task.language
+
+        env_args = {
+            "bddl_file_name": str(task.bddl_path),
             "camera_heights": self.observation_height,
             "camera_widths": self.observation_width,
             "camera_names": ["agentview", "robot0_eye_in_hand"],
@@ -180,9 +270,10 @@ def load_policy(policy_path: str, device: str):
 
 
 def make_env_processors(task_suite: str, task_id: int, camera_name: str, width: int, height: int, control_mode: str, policy_cfg):
+    suite_name = DEFAULT_TASK_SUITE if task_suite in CUSTOM_TASK_SUITES else task_suite
     env_cfg = make_env_config(
         "libero",
-        task=task_suite,
+        task=suite_name,
         task_ids=[task_id],
         render_mode="human",
         obs_type="pixels_agent_pos",
@@ -193,6 +284,22 @@ def make_env_processors(task_suite: str, task_id: int, camera_name: str, width: 
         max_parallel_tasks=1,
     )
     return make_env_pre_post_processors(env_cfg, policy_cfg)
+
+
+def make_custom_task_suite(task_suite_name: str, task_id: int):
+    specs = get_repo_local_task_specs(task_suite_name)
+    if task_id < 0 or task_id >= len(specs):
+        raise ValueError(f"task_id {task_id} is out of range for suite '{task_suite_name}'.")
+    task = make_repo_local_task(specs[task_id])
+
+    class _RepoLocalSuite:
+        def __init__(self, local_task: RepoLocalTask):
+            self.tasks = [local_task]
+
+        def get_task(self, index: int):
+            return self.tasks[index]
+
+    return _RepoLocalSuite(task)
 
 
 def prepare_observation(observation: dict[str, Any], task_instruction: str, env_preprocessor, preprocessor):
@@ -215,24 +322,41 @@ def add_batch_dim_to_nested_tensors(value: Any) -> Any:
 
 
 def run_live_episode(args: argparse.Namespace) -> int:
-    suite = _get_suite(args.task_suite)
-    if args.task_id < 0 or args.task_id >= len(suite.tasks):
-        raise ValueError(f"task_id {args.task_id} is out of range for suite '{args.task_suite}'.")
+    if args.task_suite in CUSTOM_TASK_SUITES:
+        suite = make_custom_task_suite(args.task_suite, args.task_id)
+        env = RepoLocalBddlLiberoEnv(
+            task_suite=suite,
+            task_id=0,
+            task_suite_name=args.task_suite,
+            obs_type="pixels_agent_pos",
+            render_mode="human",
+            camera_name=args.camera_name,
+            observation_width=args.observation_width,
+            observation_height=args.observation_height,
+            init_states=False,
+            episode_index=0,
+            n_envs=1,
+            control_mode=args.control_mode,
+        )
+    else:
+        suite = _get_suite(args.task_suite)
+        if args.task_id < 0 or args.task_id >= len(suite.tasks):
+            raise ValueError(f"task_id {args.task_id} is out of range for suite '{args.task_suite}'.")
 
-    env = LiveLiberoEnv(
-        task_suite=suite,
-        task_id=args.task_id,
-        task_suite_name=args.task_suite,
-        obs_type="pixels_agent_pos",
-        render_mode="human",
-        camera_name=args.camera_name,
-        observation_width=args.observation_width,
-        observation_height=args.observation_height,
-        init_states=True,
-        episode_index=0,
-        n_envs=1,
-        control_mode=args.control_mode,
-    )
+        env = LiveLiberoEnv(
+            task_suite=suite,
+            task_id=args.task_id,
+            task_suite_name=args.task_suite,
+            obs_type="pixels_agent_pos",
+            render_mode="human",
+            camera_name=args.camera_name,
+            observation_width=args.observation_width,
+            observation_height=args.observation_height,
+            init_states=True,
+            episode_index=0,
+            n_envs=1,
+            control_mode=args.control_mode,
+        )
 
     try:
         print("Starting live LIBERO viewer episode")
