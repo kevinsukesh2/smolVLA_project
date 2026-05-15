@@ -49,7 +49,7 @@ The project uses:
 
 ## Demonstration
 
-**YouTube demo link:** TODO - add YouTube link here
+(https://youtu.be/0wPfzSIen_E?si=9SdQNOTgTd5lbvYP) 
 
 The project can also run a headless evaluation that saves an `.mp4` video afterward. However, the main demonstration uses the custom live viewer script so that the robot can be seen moving live on screen.
 
